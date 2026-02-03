@@ -87,6 +87,9 @@ public class Town {
     private Spawn spawn = null;
     @Expose
     @Builder.Default
+    private Map<String, Spawn> homes = Maps.newLinkedHashMap();
+    @Expose
+    @Builder.Default
     private Log log = Log.empty();
     @Expose
     @Builder.Default
@@ -455,6 +458,79 @@ public class Town {
      */
     public void clearSpawn() {
         this.spawn = null;
+    }
+
+    /**
+     * Get the town's named homes (position waypoints members can teleport to).
+     *
+     * @return immutable map of home name to spawn position; never null
+     */
+    @NotNull
+    public Map<String, Spawn> getHomes() {
+        return homes == null ? Map.of() : Map.copyOf(homes);
+    }
+
+    /**
+     * Get a town home by name.
+     *
+     * @param name the home name (case-insensitive)
+     * @return the spawn for that home, or empty if not set
+     */
+    @NotNull
+    public Optional<Spawn> getHome(@NotNull String name) {
+        if (homes == null || homes.isEmpty()) {
+            return Optional.empty();
+        }
+        return homes.entrySet().stream()
+            .filter(e -> e.getKey().equalsIgnoreCase(name))
+            .map(Map.Entry::getValue)
+            .findFirst();
+    }
+
+    /**
+     * Set or overwrite a town home.
+     *
+     * @param name  the home name
+     * @param spawn the position (and server)
+     */
+    public void setHome(@NotNull String name, @NotNull Spawn spawn) {
+        if (homes == null) {
+            this.homes = Maps.newLinkedHashMap();
+        }
+        this.homes.put(name, spawn);
+    }
+
+    /**
+     * Remove a town home by name.
+     *
+     * @param name the home name (case-insensitive)
+     * @return true if a home was removed
+     */
+    public boolean removeHome(@NotNull String name) {
+        if (homes == null) {
+            return false;
+        }
+        return homes.entrySet().removeIf(e -> e.getKey().equalsIgnoreCase(name));
+    }
+
+    /**
+     * Rename a town home (case-insensitive match for current name).
+     *
+     * @param oldName the current home name
+     * @param newName the new home name
+     * @return true if the home was renamed
+     */
+    public boolean renameHome(@NotNull String oldName, @NotNull String newName) {
+        if (homes == null || oldName.equalsIgnoreCase(newName)) {
+            return false;
+        }
+        final Optional<Spawn> spawn = getHome(oldName);
+        if (spawn.isEmpty() || getHome(newName).isPresent()) {
+            return false;
+        }
+        homes.entrySet().removeIf(e -> e.getKey().equalsIgnoreCase(oldName));
+        homes.put(newName, spawn.get());
+        return true;
     }
 
     /**

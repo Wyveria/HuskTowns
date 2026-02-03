@@ -39,6 +39,8 @@ All of this is supported on both standalone setups and across a network of proxi
 
 **⭐ Great admin features** &mdash; Manage the towns on your server and easily make admin claims. Comes with built-in support for Dynmap, BlueMap, Pl3xMap, Plan, LuckPerms, HuskHomes & more!
 
+**⭐ Town homes** &mdash; Towns can set named waypoints (homes) that members can teleport to, just like player homes. The number of homes scales with town level (configurable in `config.yml`: base homes plus one extra every N levels). Use `/town sethome <name>`, `/town home [name]`, `/town delhome <name>`, and `/town listhomes`.
+
 **⭐ Easy to configure** &mdash; Players can fine-tune town flags and access settings in-game, and admins can easily configure roles and levels through a simple config structure.
 
 **⭐ Extensible API & open-source** &mdash; Need more? Extend the plugin with the Developer API. Or, submit a pull request through our code bounty system!

@@ -202,6 +202,11 @@ public class Settings {
         @Comment("Whether town spawns should be automatically created when a town's first claim is made.")
         private boolean firstClaimAutoSetspawn = false;
 
+        @Comment("Town homes (named waypoints): base number of homes at level 1.")
+        private int maxTownHomesBase = 1;
+        @Comment("Town homes: one additional home every N levels (e.g. 5 = +1 at level 5, 10, 15, 20). Max level is from levels.yml.")
+        private int townHomesEveryNLevels = 5;
+
         @Comment("Whether to allow players to attack other players in their town.")
         private boolean allowFriendlyFire = false;
 
@@ -263,6 +268,17 @@ public class Settings {
 
         public boolean isTownNameAllowed(@NotNull String name) {
             return prohibitedTownNames.stream().noneMatch(name::equalsIgnoreCase);
+        }
+
+        /**
+         * Maximum town homes allowed for a given town level (base + one per N levels).
+         */
+        public int getMaxTownHomesForLevel(int level) {
+            if (level < 1) {
+                return maxTownHomesBase;
+            }
+            final int extra = townHomesEveryNLevels > 0 ? level / townHomesEveryNLevels : 0;
+            return maxTownHomesBase + extra;
         }
     }
 

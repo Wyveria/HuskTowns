@@ -693,6 +693,142 @@ public class TownsManager {
         plugin.teleportUser(user, spawn.getPosition(), spawn.getServer(), false);
     }
 
+    public void setTownHome(@NotNull OnlineUser user, @NotNull String homeName, @NotNull Position position) {
+        plugin.getManager().memberEditTown(user, Privilege.SET_HOME, (member -> {
+            final Town town = member.town();
+            final int maxHomes = plugin.getSettings().getGeneral().getMaxTownHomesForLevel(town.getLevel());
+            final Map<String, Spawn> currentHomes = town.getHomes();
+            if (currentHomes.size() >= maxHomes && town.getHome(homeName).isEmpty()) {
+                plugin.getLocales().getLocale("error_town_home_max", Integer.toString(maxHomes))
+                        .ifPresent(user::sendMessage);
+                return false;
+            }
+            plugin.getManager().ifClaimOwner(member, user, position.getChunk(), position.getWorld(), (claim -> {
+                final Spawn spawn = Spawn.of(position, plugin.getServerName());
+                town.getLog().log(Action.of(user, Action.Type.SET_HOME, homeName + ": " + spawn));
+                town.setHome(homeName, spawn);
+                plugin.getLocales().getLocale("town_home_set", town.getName(), homeName)
+                        .ifPresent(user::sendMessage);
+            }));
+            return true;
+        }));
+    }
+
+    public void removeTownHome(@NotNull OnlineUser user, @NotNull String homeName) {
+        plugin.getManager().memberEditTown(user, Privilege.SET_HOME, (member -> {
+            final Town town = member.town();
+            if (!town.removeHome(homeName)) {
+                plugin.getLocales().getLocale("error_town_home_not_found", homeName)
+                        .ifPresent(user::sendMessage);
+                return false;
+            }
+            town.getLog().log(Action.of(user, Action.Type.DEL_HOME, homeName));
+            plugin.getLocales().getLocale("town_home_removed", town.getName(), homeName)
+                    .ifPresent(user::sendMessage);
+            return true;
+        }));
+    }
+
+    public void renameTownHome(@NotNull OnlineUser user, @NotNull String oldName, @NotNull String newName) {
+        plugin.getManager().memberEditTown(user, Privilege.SET_HOME, (member -> {
+            final Town town = member.town();
+            if (town.getHome(oldName).isEmpty()) {
+                plugin.getLocales().getLocale("error_town_home_not_found", oldName)
+                        .ifPresent(user::sendMessage);
+                return false;
+            }
+            if (town.getHome(newName).isPresent()) {
+                plugin.getLocales().getLocale("error_town_home_name_taken", newName)
+                        .ifPresent(user::sendMessage);
+                return false;
+            }
+            if (!town.renameHome(oldName, newName)) {
+                return false;
+            }
+            town.getLog().log(Action.of(user, Action.Type.RENAME_HOME, oldName + " → " + newName));
+            plugin.getLocales().getLocale("town_home_renamed", town.getName(), oldName, newName)
+                    .ifPresent(user::sendMessage);
+            return true;
+        }));
+    }
+
+    public void teleportToTownHome(@NotNull OnlineUser user, @Nullable String townName, @NotNull String homeName) {
+        final Optional<Town> optionalTown = townName == null ? plugin.getUserTown(user).map(Member::town) :
+                plugin.getTowns().stream().filter(t -> t.getName().equalsIgnoreCase(townName)).findFirst();
+        if (optionalTown.isEmpty()) {
+            plugin.getLocales().getLocale("error_town_spawn_not_found")
+                    .ifPresent(user::sendMessage);
+            return;
+        }
+        final Town town = optionalTown.get();
+        final Optional<Member> member = plugin.getUserTown(user);
+        final Optional<Spawn> home = town.getHome(homeName);
+        if (home.isEmpty()) {
+            plugin.getLocales().getLocale("error_town_home_not_found", homeName)
+                    .ifPresent(user::sendMessage);
+            return;
+        }
+        final Spawn spawn = home.get();
+        if (!user.hasPermission(SPAWN_PRIVACY_BYPASS_PERMISSION) && !spawn.isPublic()) {
+            if (member.isEmpty() || !(member.get().town().equals(town))) {
+                plugin.getLocales().getLocale("error_town_spawn_not_public")
+                        .ifPresent(user::sendMessage);
+                return;
+            }
+            if (!member.get().hasPrivilege(plugin, Privilege.SPAWN)) {
+                plugin.getLocales().getLocale("error_insufficient_privileges", town.getName())
+                        .ifPresent(user::sendMessage);
+                return;
+            }
+        }
+        plugin.getLocales().getLocale("teleporting_town_home", town.getName(), homeName)
+                .ifPresent(user::sendMessage);
+        plugin.teleportUser(user, spawn.getPosition(), spawn.getServer(), false);
+    }
+
+    public void listTownHomes(@NotNull OnlineUser user, @Nullable String townName, int page) {
+        final Optional<Town> optionalTown = townName == null ? plugin.getUserTown(user).map(Member::town) :
+                plugin.getTowns().stream().filter(t -> t.getName().equalsIgnoreCase(townName)).findFirst();
+        if (optionalTown.isEmpty()) {
+            plugin.getLocales().getLocale("error_town_spawn_not_found")
+                    .ifPresent(user::sendMessage);
+            return;
+        }
+        final Town town = optionalTown.get();
+        final Map<String, Spawn> homes = town.getHomes();
+        if (homes.isEmpty()) {
+            plugin.getLocales().getLocale("town_home_list_empty", town.getName())
+                    .ifPresent(user::sendMessage);
+            return;
+        }
+        final String resolvedTownName = town.getName();
+        final boolean ownTown = townName == null;
+        final String listItemKey = ownTown ? "town_home_list_item_editable" : "town_home_list_item";
+        final List<String> items = homes.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(e -> plugin.getLocales().getRawLocale(listItemKey,
+                        Locales.escapeText(e.getKey()),
+                        Integer.toString((int) e.getValue().getPosition().getX()),
+                        Integer.toString((int) e.getValue().getPosition().getY()),
+                        Integer.toString((int) e.getValue().getPosition().getZ()),
+                        e.getValue().getPosition().getWorld().getName(),
+                        resolvedTownName)
+                        .orElse(ownTown
+                                ? "[" + e.getKey() + "](run_command=/husktowns:town edithome " + e.getKey() + ")"
+                                : "[" + e.getKey() + "](run_command=/husktowns:town home " + resolvedTownName + " " + e.getKey() + ")"))
+                .toList();
+        final String listCommand = townName == null ? "/husktowns:town listhomes" : "/husktowns:town listhomes " + resolvedTownName;
+        user.sendMessage(PaginatedList.of(items,
+                plugin.getLocales().getBaseList(plugin.getSettings().getGeneral().getListItemsPerPage())
+                        .setHeaderFormat(plugin.getLocales().getRawLocale("town_home_list_page_title",
+                                resolvedTownName, "%first_item_on_page_index%", "%last_item_on_page_index%", "%total_items%")
+                                .orElse(""))
+                        .setCommand(listCommand)
+                        .setItemSeparator("\n")
+                        .build())
+                .getNearestValidPage(page));
+    }
+
     public void depositMoney(@NotNull OnlineUser user, @NotNull BigDecimal amount) {
         final Optional<EconomyHook> optionalHook = plugin.getEconomyHook();
         if (optionalHook.isEmpty()) {

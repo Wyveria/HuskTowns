@@ -21,6 +21,7 @@ package net.william278.husktowns.menu;
 
 import de.themoep.minedown.adventure.MineDown;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
 import net.william278.husktowns.HuskTowns;
 import net.william278.husktowns.town.Privilege;
 import net.william278.husktowns.town.Spawn;
@@ -63,6 +64,7 @@ public class Overview {
             .append(getWarStatus())
             .appendNewline()
             .append(getStats())
+            .append(getTownHomes())
             .append(getSpawn())
             .appendNewline()
             .append(getButtons());
@@ -122,6 +124,18 @@ public class Overview {
                     : plugin.formatMoney(plugin.getLevels().getLevelUpCost(town.getLevel())))
             .map(mineDown -> mineDown.toComponent().appendNewline())
             .orElse(Component.empty());
+    }
+
+    @NotNull
+    private Component getTownHomes() {
+        final int current = town.getHomes().size();
+        final int max = plugin.getSettings().getGeneral().getMaxTownHomesForLevel(town.getLevel());
+        return plugin.getLocales().getLocale("town_overview_homes",
+                Integer.toString(current), Integer.toString(max))
+            .map(mineDown -> mineDown.toComponent().appendNewline())
+            .orElse(Component.text("Homes: " + current + "/" + max)
+                .color(TextColor.fromHexString("#ffc43b"))
+                .append(Component.newline()));
     }
 
     @NotNull

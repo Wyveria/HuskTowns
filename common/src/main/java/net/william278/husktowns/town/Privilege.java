@@ -107,6 +107,10 @@ public enum Privilege {
      **/
     SET_SPAWN,
     /**
+     * Ability to set and remove town homes (named waypoints members can teleport to)
+     **/
+    SET_HOME,
+    /**
      * Ability to toggle the privacy of your town's spawn
      **/
     SPAWN_PRIVACY,

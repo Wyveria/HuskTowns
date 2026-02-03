@@ -64,6 +64,7 @@ public class Roles {
             Privilege.SET_RULES.id(),
             Privilege.RENAME.id(),
             Privilege.SET_COLOR.id(),
+            Privilege.SET_HOME.id(),
             Privilege.DECLARE_WAR.id()),
         "2", List.of(
             Privilege.SET_FARM.id(),
@@ -76,6 +77,7 @@ public class Roles {
             Privilege.SET_FAREWELL.id(),
             Privilege.INVITE.id(),
             Privilege.SET_SPAWN.id(),
+            Privilege.SET_HOME.id(),
             Privilege.MANAGE_RELATIONS.id(),
             Privilege.SPAWN_PRIVACY.id(),
             Privilege.VIEW_LOGS.id()),
@@ -97,7 +99,11 @@ public class Roles {
         final ArrayList<Role> roleList = new ArrayList<>();
         for (final Map.Entry<String, List<String>> roleMapping : roles.entrySet()) {
             final int weight = Integer.parseInt(roleMapping.getKey());
-            final List<Privilege> privileges = roleMapping.getValue().stream().map(Privilege::fromId).toList();
+            List<Privilege> privileges = new ArrayList<>(roleMapping.getValue().stream().map(Privilege::fromId).toList());
+            // Backfill town home privileges for roles that should have them (Trustee and above)
+            if ((weight == 2 || weight == 3) && !privileges.contains(Privilege.SET_HOME)) {
+                privileges.add(Privilege.SET_HOME);
+            }
             roleList.add(Role.of(weight, getName(weight), privileges));
         }
         return roleList;

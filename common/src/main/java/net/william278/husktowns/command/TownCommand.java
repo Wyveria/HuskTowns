@@ -33,7 +33,9 @@ import net.william278.husktowns.map.MapSquare;
 import net.william278.husktowns.menu.Overview;
 import net.william278.husktowns.town.Invite;
 import net.william278.husktowns.town.Member;
+import net.william278.husktowns.town.Privilege;
 import net.william278.husktowns.town.Role;
+import net.william278.husktowns.town.Spawn;
 import net.william278.husktowns.town.Town;
 import net.william278.husktowns.user.CommandUser;
 import net.william278.husktowns.user.OnlineUser;
@@ -78,6 +80,11 @@ public final class TownCommand extends Command {
             new SpawnCommand(this, plugin),
             new SetSpawnCommand(this, plugin),
             new ClearSpawnCommand(this, plugin),
+            new SetHomeCommand(this, plugin),
+            new HomeCommand(this, plugin),
+            new DelHomeCommand(this, plugin),
+            new EditHomeCommand(this, plugin),
+            new ListHomesCommand(this, plugin),
             new PrivacyCommand(this, plugin),
             new ChatCommand(this, plugin),
             new PlayerCommand(this, plugin),
@@ -833,6 +840,254 @@ public final class TownCommand extends Command {
         public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
             final OnlineUser user = (OnlineUser) executor;
             plugin.getManager().towns().clearTownSpawn(user);
+        }
+    }
+
+    private static class SetHomeCommand extends ChildCommand implements TabProvider {
+        protected SetHomeCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("sethome", List.of(), parent, "<name>", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            final Optional<String> name = parseStringArg(args, 0);
+            if (name.isEmpty()) {
+                plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
+                        .ifPresent(executor::sendMessage);
+                return;
+            }
+            final String homeName = name.get();
+            if (homeName.length() < 1 || homeName.length() > 32 || !homeName.matches("[a-zA-Z0-9_]+")) {
+                plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
+                        .ifPresent(executor::sendMessage);
+                return;
+            }
+            final OnlineUser user = (OnlineUser) executor;
+            plugin.getManager().towns().setTownHome(user, homeName, user.getPosition());
+        }
+
+        @Override
+        @Nullable
+        public List<String> suggest(@NotNull CommandUser user, @NotNull String[] args) {
+            return List.of();
+        }
+    }
+
+    private static class HomeCommand extends ChildCommand implements TabProvider {
+        protected HomeCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("home", List.of("townhome"), parent, "[town] <name>", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            final OnlineUser user = (OnlineUser) executor;
+            if (args.length < 1) {
+                plugin.getManager().towns().listTownHomes(user, null, 1);
+                return;
+            }
+            if (args.length == 1) {
+                final Optional<Integer> page = parseIntArg(args, 0);
+                if (page.isPresent()) {
+                    plugin.getManager().towns().listTownHomes(user, null, page.get());
+                } else {
+                    plugin.getManager().towns().teleportToTownHome(user, null, args[0]);
+                }
+                return;
+            }
+            final Optional<Integer> page = parseIntArg(args, 1);
+            if (page.isPresent()) {
+                plugin.getManager().towns().listTownHomes(user, args[0], page.get());
+            } else {
+                plugin.getManager().towns().teleportToTownHome(user, args[0], args[1]);
+            }
+        }
+
+        @Override
+        @Nullable
+        public List<String> suggest(@NotNull CommandUser user, @NotNull String[] args) {
+            final Optional<Member> member = user instanceof OnlineUser online ? plugin.getUserTown(online) : Optional.empty();
+            if (args.length == 1) {
+                if (member.isPresent()) {
+                    return filter(member.get().town().getHomes().keySet().stream().toList(), args);
+                }
+                return filter(plugin.getTowns().stream().map(Town::getName).toList(), args);
+            }
+            if (args.length == 2) {
+                final Optional<Town> town = plugin.getTowns().stream()
+                        .filter(t -> t.getName().equalsIgnoreCase(args[0])).findFirst();
+                return town.map(t -> filter(t.getHomes().keySet().stream().toList(), args)).orElse(List.of());
+            }
+            return List.of();
+        }
+    }
+
+    private static class DelHomeCommand extends ChildCommand implements TabProvider {
+        protected DelHomeCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("delhome", List.of("removehome"), parent, "<name>", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            final Optional<String> name = parseStringArg(args, 0);
+            if (name.isEmpty()) {
+                plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
+                        .ifPresent(executor::sendMessage);
+                return;
+            }
+            final OnlineUser user = (OnlineUser) executor;
+            plugin.getManager().towns().removeTownHome(user, name.get());
+        }
+
+        @Override
+        @Nullable
+        public List<String> suggest(@NotNull CommandUser user, @NotNull String[] args) {
+            final Optional<Member> member = user instanceof OnlineUser online ? plugin.getUserTown(online) : Optional.empty();
+            if (member.isEmpty() || args.length != 1) {
+                return List.of();
+            }
+            return filter(member.get().town().getHomes().keySet().stream().toList(), args);
+        }
+    }
+
+    private static class EditHomeCommand extends ChildCommand implements TabProvider {
+        protected EditHomeCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("edithome", List.of(), parent, "<name> [relocate|rename <newName>|delete]", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            final Optional<String> name = parseStringArg(args, 0);
+            if (name.isEmpty()) {
+                plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
+                        .ifPresent(executor::sendMessage);
+                return;
+            }
+            final OnlineUser user = (OnlineUser) executor;
+            final Optional<Member> member = plugin.getUserTown(user);
+            if (member.isEmpty()) {
+                plugin.getLocales().getLocale("error_not_in_town")
+                        .ifPresent(executor::sendMessage);
+                return;
+            }
+            final Town town = member.get().town();
+            final Optional<Spawn> home = town.getHome(name.get());
+            if (home.isEmpty()) {
+                plugin.getLocales().getLocale("error_town_home_not_found", name.get())
+                        .ifPresent(executor::sendMessage);
+                return;
+            }
+            final String homeNameKey = town.getHomes().entrySet().stream()
+                    .filter(e -> e.getKey().equalsIgnoreCase(name.get()))
+                    .map(Map.Entry::getKey)
+                    .findFirst()
+                    .orElse(name.get());
+            final Optional<String> operation = args.length > 1 ? parseStringArg(args, 1) : Optional.empty();
+            if (operation.isEmpty()) {
+                showEditMenu(user, member.get(), town, homeNameKey, home.get());
+                return;
+            }
+            switch (operation.get().toLowerCase(java.util.Locale.ENGLISH)) {
+                case "relocate" -> {
+                    if (!member.get().hasPrivilege(plugin, Privilege.SET_HOME)) {
+                        plugin.getLocales().getLocale("error_insufficient_privileges", town.getName())
+                                .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    plugin.getManager().towns().setTownHome(user, homeNameKey, user.getPosition());
+                }
+                case "rename" -> {
+                    if (!member.get().hasPrivilege(plugin, Privilege.SET_HOME)) {
+                        plugin.getLocales().getLocale("error_insufficient_privileges", town.getName())
+                                .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    final Optional<String> newName = parseStringArg(args, 2);
+                    if (newName.isEmpty()) {
+                        plugin.getLocales().getLocale("error_invalid_syntax",
+                                "/town edithome " + homeNameKey + " rename <newName>")
+                                .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    final String n = newName.get();
+                    if (n.length() < 1 || n.length() > 32 || !n.matches("[a-zA-Z0-9_]+")) {
+                        plugin.getLocales().getLocale("error_invalid_syntax", getUsage())
+                                .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    plugin.getManager().towns().renameTownHome(user, homeNameKey, n);
+                }
+                case "delete" -> {
+                    if (!member.get().hasPrivilege(plugin, Privilege.SET_HOME)) {
+                        plugin.getLocales().getLocale("error_insufficient_privileges", town.getName())
+                                .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    plugin.getManager().towns().removeTownHome(user, homeNameKey);
+                }
+                default -> showEditMenu(user, member.get(), town, homeNameKey, home.get());
+            }
+        }
+
+        private void showEditMenu(@NotNull OnlineUser user, @NotNull Member member,
+                                  @NotNull Town town, @NotNull String homeName, @NotNull Spawn spawn) {
+            plugin.getLocales().getLocale("edit_town_home_menu_title", homeName)
+                    .ifPresent(user::sendMessage);
+            plugin.getLocales().getLocale("edit_town_home_menu_coordinates",
+                    String.format("%.1f", spawn.getPosition().getX()),
+                    String.format("%.1f", spawn.getPosition().getY()),
+                    String.format("%.1f", spawn.getPosition().getZ()),
+                    spawn.getPosition().getWorld().getName())
+                    .ifPresent(user::sendMessage);
+            plugin.getLocales().getLocale("edit_town_home_menu_use_buttons", homeName)
+                    .ifPresent(user::sendMessage);
+            if (member.hasPrivilege(plugin, Privilege.SET_HOME)) {
+                plugin.getLocales().getLocale("edit_town_home_menu_manage_buttons", homeName)
+                        .ifPresent(user::sendMessage);
+                plugin.getLocales().getLocale("edit_town_home_menu_rename_button", homeName)
+                        .ifPresent(user::sendMessage);
+            }
+        }
+
+        @Override
+        @Nullable
+        public List<String> suggest(@NotNull CommandUser user, @NotNull String[] args) {
+            final Optional<Member> member = user instanceof OnlineUser online ? plugin.getUserTown(online) : Optional.empty();
+            if (member.isEmpty()) {
+                return List.of();
+            }
+            if (args.length == 1) {
+                return filter(member.get().town().getHomes().keySet().stream().toList(), args);
+            }
+            if (args.length == 2) {
+                return filter(List.of("relocate", "rename", "delete"), args);
+            }
+            return List.of();
+        }
+    }
+
+    private static class ListHomesCommand extends ChildCommand {
+        protected ListHomesCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("listhomes", List.of("homes"), parent, "[town] [page]", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            final OnlineUser user = (OnlineUser) executor;
+            if (args.length == 0) {
+                plugin.getManager().towns().listTownHomes(user, null, 1);
+                return;
+            }
+            if (args.length == 1) {
+                final Optional<Integer> page = parseIntArg(args, 0);
+                if (page.isPresent()) {
+                    plugin.getManager().towns().listTownHomes(user, null, page.get());
+                } else {
+                    plugin.getManager().towns().listTownHomes(user, args[0], 1);
+                }
+                return;
+            }
+            final int page = parseIntArg(args, 1).orElse(1);
+            plugin.getManager().towns().listTownHomes(user, args[0], page);
         }
     }
 
