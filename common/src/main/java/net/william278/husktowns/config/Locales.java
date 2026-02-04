@@ -150,6 +150,39 @@ public class Locales {
         return value.toString().replace("__", "_\\_");
     }
 
+    /**
+     * Unescape a string that was escaped with {@link #escapeText(String)} for use after parsing
+     * (e.g. when reading a home name from a click command that used escaped text in the link).
+     *
+     * @param string The escaped string
+     * @return The unescaped string
+     */
+    @NotNull
+    public static String unescapeText(@NotNull String string) {
+        final StringBuilder value = new StringBuilder();
+        for (int i = 0; i < string.length(); ++i) {
+            final char c = string.charAt(i);
+            if (c == '\\' && i + 1 < string.length()) {
+                final char next = string.charAt(i + 1);
+                final boolean isEvent = next == '[' || next == ']' || next == '(' || next == ')';
+                final boolean isEscape = next == '\\';
+                final boolean isColorCode = next == 167 || next == '&';
+                if (next == '_') {
+                    value.append("__");
+                    i++;
+                    continue;
+                }
+                if (isEvent || isEscape || isColorCode) {
+                    value.append(next);
+                    i++;
+                    continue;
+                }
+            }
+            value.append(c);
+        }
+        return value.toString();
+    }
+
     @NotNull
     public String truncateText(@NotNull String string, int truncateAfter) {
         if (string.isBlank()) {

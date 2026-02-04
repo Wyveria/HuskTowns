@@ -106,6 +106,10 @@ public class Town {
     @Builder.Default
     private Map<String, String> metadata = Maps.newHashMap();
     @Expose
+    @SerializedName("role_names")
+    @Builder.Default
+    private Map<String, String> roleNames = Maps.newHashMap();
+    @Expose
     @SerializedName("schema_version")
     private int schemaVersion;
 
@@ -783,6 +787,56 @@ public class Town {
         } catch (InvalidKeyException e) {
             throw new IllegalStateException("Invalid key in town \"" + getName() + "\" metadata", e);
         }
+    }
+
+    /**
+     * Get the display name for a role in this town, or the global default if not overridden.
+     *
+     * @param plugin the HuskTowns plugin instance
+     * @param weight the role weight (1 = resident, 2 = trustee, 3 = mayor)
+     * @return the display name for the role in this town
+     */
+    @NotNull
+    public String getRoleName(@NotNull HuskTowns plugin, int weight) {
+        final String key = Integer.toString(weight);
+        if (roleNames != null && roleNames.containsKey(key)) {
+            final String custom = roleNames.get(key);
+            if (custom != null && !custom.isBlank()) {
+                return custom;
+            }
+        }
+        return plugin.getRoles().fromWeight(weight)
+            .map(Role::getName)
+            .orElse("Role " + weight);
+    }
+
+    /**
+     * Set a custom display name for a role in this town. Pass {@code null} or empty to use the global default.
+     *
+     * @param weight the role weight (1 = resident, 2 = trustee, 3 = mayor)
+     * @param name   the display name, or null/empty to reset to global default
+     */
+    public void setRoleName(int weight, @Nullable String name) {
+        if (roleNames == null) {
+            this.roleNames = Maps.newHashMap();
+        }
+        final String key = Integer.toString(weight);
+        if (name == null || name.isBlank()) {
+            roleNames.remove(key);
+        } else {
+            roleNames.put(key, name);
+        }
+    }
+
+    /**
+     * Get the mapping of role weights to custom display names for this town.
+     * Only contains overrides; empty or missing keys use the global config name.
+     *
+     * @return the map of role weight (as string) to custom name
+     */
+    @NotNull
+    public Map<String, String> getRoleNames() {
+        return roleNames == null ? Map.of() : Map.copyOf(roleNames);
     }
 
     /**

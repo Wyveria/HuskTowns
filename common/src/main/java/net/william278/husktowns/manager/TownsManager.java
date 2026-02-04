@@ -429,17 +429,18 @@ public class TownsManager {
             }
 
             final Role newRole = nextRole.get();
-            plugin.fireEvent(plugin.getMemberRoleChangeEvent(promoted.get(), promotedMember.get().town(), promotedMember.get().role(), newRole),
+                    plugin.fireEvent(plugin.getMemberRoleChangeEvent(promoted.get(), promotedMember.get().town(), promotedMember.get().role(), newRole),
                     (onPromoted -> plugin.getManager().editTown(user, onPromoted.getTown(), (town -> {
                         town.getMembers().put(promoted.get().getUuid(), newRole.getWeight());
+                        final String roleDisplayName = town.getRoleName(plugin, newRole.getWeight());
                         plugin.getLocales().getLocale("promoted_user",
-                                promoted.get().getUsername(), newRole.getName()).ifPresent(user::sendMessage);
+                                promoted.get().getUsername(), roleDisplayName).ifPresent(user::sendMessage);
 
                         plugin.getOnlineUsers().stream()
                                 .filter(online -> online.equals(promoted.get()))
                                 .findFirst()
                                 .ifPresentOrElse(onlineUser -> plugin.getLocales()
-                                                .getLocale("promoted_you", newRole.getName(), user.getUsername())
+                                                .getLocale("promoted_you", roleDisplayName, user.getUsername())
                                                 .ifPresent(onlineUser::sendMessage),
                                         () -> plugin.getMessageBroker().ifPresent(broker -> Message.builder()
                                                 .type(Message.Type.TOWN_PROMOTED)
@@ -487,14 +488,15 @@ public class TownsManager {
             plugin.fireEvent(plugin.getMemberRoleChangeEvent(demotedMember.get().user(), demotedMember.get().town(), demotedMember.get().role(), newRole),
                     (onDemote -> plugin.getManager().editTown(user, onDemote.getTown(), (town -> {
                         town.getMembers().put(demoted.get().getUuid(), newRole.getWeight());
+                        final String roleDisplayName = town.getRoleName(plugin, newRole.getWeight());
                         plugin.getLocales().getLocale("demoted_user",
-                                demoted.get().getUsername(), newRole.getName()).ifPresent(user::sendMessage);
+                                demoted.get().getUsername(), roleDisplayName).ifPresent(user::sendMessage);
 
                         plugin.getOnlineUsers().stream()
                                 .filter(online -> online.equals(demoted.get()))
                                 .findFirst()
                                 .ifPresentOrElse(onlineUser -> plugin.getLocales()
-                                                .getLocale("demoted_you", newRole.getName(), user.getUsername())
+                                                .getLocale("demoted_you", roleDisplayName, user.getUsername())
                                                 .ifPresent(onlineUser::sendMessage),
                                         () -> plugin.getMessageBroker().ifPresent(broker -> Message.builder()
                                                 .type(Message.Type.TOWN_DEMOTED)
@@ -577,6 +579,35 @@ public class TownsManager {
             town.getFarewell().flatMap(farewell -> plugin.getLocales().getLocale("town_farewell_set",
                     farewell, town.getColorRgb())).ifPresent(user::sendMessage);
             return true;
+        }));
+    }
+
+    public void setTownRoleName(@NotNull OnlineUser user, int roleWeight, @Nullable String name) {
+        plugin.getManager().ifMember(user, null, (member -> {
+            final Town town = member.town();
+            final boolean canEdit = member.hasPrivilege(plugin, Privilege.RENAME)
+                || town.getMayor().equals(member.user().getUuid());
+            if (!canEdit) {
+                plugin.getLocales().getLocale("error_insufficient_privileges", town.getName())
+                    .ifPresent(user::sendMessage);
+                return;
+            }
+            if (name != null && !name.isBlank() && !plugin.getValidator().isValidTownMetadata(name)) {
+                plugin.getLocales().getLocale("error_invalid_meta",
+                        Integer.toString(Validator.MAX_TOWN_META_LENGTH)).ifPresent(user::sendMessage);
+                return;
+            }
+
+            final String previousName = town.getRoleName(plugin, roleWeight);
+            town.setRoleName(roleWeight, name);
+            plugin.getManager().updateTownData(user, town);
+            if (name == null || name.isBlank()) {
+                plugin.getLocales().getLocale("town_role_name_reset", previousName, town.getRoleName(plugin, roleWeight))
+                        .ifPresent(user::sendMessage);
+            } else {
+                plugin.getLocales().getLocale("town_role_name_set", previousName, name)
+                        .ifPresent(user::sendMessage);
+            }
         }));
     }
 
@@ -696,13 +727,28 @@ public class TownsManager {
     public void setTownHome(@NotNull OnlineUser user, @NotNull String homeName, @NotNull Position position) {
         plugin.getManager().memberEditTown(user, Privilege.SET_HOME, (member -> {
             final Town town = member.town();
-            final int maxHomes = plugin.getSettings().getGeneral().getMaxTownHomesForLevel(town.getLevel());
-            final Map<String, Spawn> currentHomes = town.getHomes();
-            if (currentHomes.size() >= maxHomes && town.getHome(homeName).isEmpty()) {
-                plugin.getLocales().getLocale("error_town_home_max", Integer.toString(maxHomes))
-                        .ifPresent(user::sendMessage);
-                return false;
+            final boolean isRelocate = town.getHome(homeName).isPresent();
+            if (!isRelocate) {
+                final int maxHomes = plugin.getSettings().getGeneral().getMaxTownHomesForLevel(town.getLevel());
+                final Map<String, Spawn> currentHomes = town.getHomes();
+                if (currentHomes.size() >= maxHomes) {
+                    plugin.getLocales().getLocale("error_town_home_max", Integer.toString(maxHomes))
+                            .ifPresent(user::sendMessage);
+                    return false;
+                }
             }
+            if (isRelocate) {
+                // Relocate: update position from anywhere, no claim check
+                final Spawn spawn = Spawn.of(position, plugin.getServerName());
+                town.getLog().log(Action.of(user, Action.Type.SET_HOME, homeName + ": " + spawn));
+                town.setHome(homeName, spawn);
+                plugin.getLocales().getLocale("town_home_relocated", homeName)
+                        .ifPresentOrElse(user::sendMessage,
+                                () -> user.sendMessage(Component.text("Re-located town home " + homeName + " to your current position.")
+                                        .color(TextColor.fromHexString("#00fb9a"))));
+                return true;
+            }
+            // New home: require standing in a town claim
             plugin.getManager().ifClaimOwner(member, user, position.getChunk(), position.getWorld(), (claim -> {
                 final Spawn spawn = Spawn.of(position, plugin.getServerName());
                 town.getLog().log(Action.of(user, Action.Type.SET_HOME, homeName + ": " + spawn));
@@ -718,13 +764,23 @@ public class TownsManager {
         plugin.getManager().memberEditTown(user, Privilege.SET_HOME, (member -> {
             final Town town = member.town();
             if (!town.removeHome(homeName)) {
-                plugin.getLocales().getLocale("error_town_home_not_found", homeName)
-                        .ifPresent(user::sendMessage);
+                plugin.runSync(() -> {
+                    plugin.getLocales().getLocale("error_town_home_not_found", homeName)
+                            .ifPresentOrElse(user::sendMessage,
+                                    () -> user.sendMessage(Component.text("Town home not found: " + homeName)
+                                            .color(TextColor.fromHexString("#ff7e5e"))));
+                    plugin.getLocales().getLocale("town_home_list_stale_hint")
+                            .ifPresentOrElse(user::sendMessage,
+                                    () -> user.sendMessage(Component.text("It may have been renamed or deleted. Run /town home to refresh the list.")
+                                            .color(TextColor.fromHexString("#00fb9a"))));
+                });
                 return false;
             }
             town.getLog().log(Action.of(user, Action.Type.DEL_HOME, homeName));
             plugin.getLocales().getLocale("town_home_removed", town.getName(), homeName)
-                    .ifPresent(user::sendMessage);
+                    .ifPresentOrElse(user::sendMessage,
+                            () -> user.sendMessage(Component.text("Deleted town home " + homeName + ".")
+                                    .color(TextColor.fromHexString("#00fb9a"))));
             return true;
         }));
     }
@@ -733,8 +789,16 @@ public class TownsManager {
         plugin.getManager().memberEditTown(user, Privilege.SET_HOME, (member -> {
             final Town town = member.town();
             if (town.getHome(oldName).isEmpty()) {
-                plugin.getLocales().getLocale("error_town_home_not_found", oldName)
-                        .ifPresent(user::sendMessage);
+                plugin.runSync(() -> {
+                    plugin.getLocales().getLocale("error_town_home_not_found", oldName)
+                            .ifPresentOrElse(user::sendMessage,
+                                    () -> user.sendMessage(Component.text("Town home not found: " + oldName)
+                                            .color(TextColor.fromHexString("#ff7e5e"))));
+                    plugin.getLocales().getLocale("town_home_list_stale_hint")
+                            .ifPresentOrElse(user::sendMessage,
+                                    () -> user.sendMessage(Component.text("It may have been renamed or deleted. Run /town home to refresh the list.")
+                                            .color(TextColor.fromHexString("#00fb9a"))));
+                });
                 return false;
             }
             if (town.getHome(newName).isPresent()) {
@@ -746,8 +810,10 @@ public class TownsManager {
                 return false;
             }
             town.getLog().log(Action.of(user, Action.Type.RENAME_HOME, oldName + " → " + newName));
-            plugin.getLocales().getLocale("town_home_renamed", town.getName(), oldName, newName)
-                    .ifPresent(user::sendMessage);
+            plugin.getLocales().getLocale("town_home_renamed", oldName, newName)
+                    .ifPresentOrElse(user::sendMessage,
+                            () -> user.sendMessage(Component.text("Renamed town home " + oldName + " → " + newName + ".")
+                                    .color(TextColor.fromHexString("#00fb9a"))));
             return true;
         }));
     }
@@ -765,7 +831,13 @@ public class TownsManager {
         final Optional<Spawn> home = town.getHome(homeName);
         if (home.isEmpty()) {
             plugin.getLocales().getLocale("error_town_home_not_found", homeName)
-                    .ifPresent(user::sendMessage);
+                    .ifPresentOrElse(user::sendMessage,
+                            () -> user.sendMessage(Component.text("Town home not found: " + homeName)
+                                    .color(TextColor.fromHexString("#ff7e5e"))));
+            plugin.getLocales().getLocale("town_home_list_stale_hint")
+                    .ifPresentOrElse(user::sendMessage,
+                            () -> user.sendMessage(Component.text("It may have been renamed or deleted. Run /town home to refresh the list.")
+                                    .color(TextColor.fromHexString("#00fb9a"))));
             return;
         }
         final Spawn spawn = home.get();
@@ -786,6 +858,11 @@ public class TownsManager {
         plugin.teleportUser(user, spawn.getPosition(), spawn.getServer(), false);
     }
 
+    /** Escape % so values (e.g. home name, world name) are not interpreted as placeholders after substitution. */
+    private static String escapePlaceholders(@NotNull String value) {
+        return value.replace("%", "%%");
+    }
+
     public void listTownHomes(@NotNull OnlineUser user, @Nullable String townName, int page) {
         final Optional<Town> optionalTown = townName == null ? plugin.getUserTown(user).map(Member::town) :
                 plugin.getTowns().stream().filter(t -> t.getName().equalsIgnoreCase(townName)).findFirst();
@@ -802,29 +879,40 @@ public class TownsManager {
             return;
         }
         final String resolvedTownName = town.getName();
-        final boolean ownTown = townName == null;
-        final String listItemKey = ownTown ? "town_home_list_item_editable" : "town_home_list_item";
+        final boolean canEditHomes = plugin.getUserTown(user)
+                .filter(member -> member.town().equals(town))
+                .filter(member -> member.hasPrivilege(plugin, Privilege.SET_HOME))
+                .isPresent();
+        // Build list items in code with no % in the item string so PaginatedList never treats
+        // anything as a placeholder ("unable to parse placeholder"). Use [name] not [[name]]
+        // so MineDown link parsing is unambiguous. Command handler unescapes the name.
+        final String safeTownName = escapePlaceholders(resolvedTownName);
         final List<String> items = homes.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
-                .map(e -> plugin.getLocales().getRawLocale(listItemKey,
-                        Locales.escapeText(e.getKey()),
-                        Integer.toString((int) e.getValue().getPosition().getX()),
-                        Integer.toString((int) e.getValue().getPosition().getY()),
-                        Integer.toString((int) e.getValue().getPosition().getZ()),
-                        e.getValue().getPosition().getWorld().getName(),
-                        resolvedTownName)
-                        .orElse(ownTown
-                                ? "[" + e.getKey() + "](run_command=/husktowns:town edithome " + e.getKey() + ")"
-                                : "[" + e.getKey() + "](run_command=/husktowns:town home " + resolvedTownName + " " + e.getKey() + ")"))
+                .map(e -> {
+                    final String name = e.getKey();
+                    final String displayName = Locales.escapeText(name);
+                    final String world = e.getValue().getPosition().getWorld().getName();
+                    final int x = (int) e.getValue().getPosition().getX();
+                    final int y = (int) e.getValue().getPosition().getY();
+                    final int z = (int) e.getValue().getPosition().getZ();
+                    final String safeWorld = Locales.escapeText(world);
+                    // Hover and run_command use escaped name so no ], ), etc. break the link
+                    final String hover = "&#00fb9a&" + displayName + "\n&7\u29E0 " + safeWorld + "  x: " + x + ", y: " + y + ", z: " + z + "\n&7\u2139 " + (canEditHomes ? "Click to edit" : "Click to teleport");
+                    if (canEditHomes) {
+                        return "[" + displayName + "](show_text=" + hover + " run_command=/husktowns:town edithome " + displayName + ")";
+                    }
+                    final String safeTownInCommand = Locales.escapeText(resolvedTownName);
+                    return "[" + displayName + "](show_text=" + hover + " run_command=/husktowns:town home " + safeTownInCommand + " " + displayName + ")";
+                })
                 .toList();
         final String listCommand = townName == null ? "/husktowns:town listhomes" : "/husktowns:town listhomes " + resolvedTownName;
         user.sendMessage(PaginatedList.of(items,
                 plugin.getLocales().getBaseList(plugin.getSettings().getGeneral().getListItemsPerPage())
                         .setHeaderFormat(plugin.getLocales().getRawLocale("town_home_list_page_title",
-                                resolvedTownName, "%first_item_on_page_index%", "%last_item_on_page_index%", "%total_items%")
+                                safeTownName, "%first_item_on_page_index%", "%last_item_on_page_index%", "%total_items%")
                                 .orElse(""))
                         .setCommand(listCommand)
-                        .setItemSeparator("\n")
                         .build())
                 .getNearestValidPage(page));
     }
@@ -1184,7 +1272,7 @@ public class TownsManager {
         final Member member = optionalMember.get();
         plugin.getLocales().getLocale(
                         "town_player_info",
-                        username, member.town().getName(), member.role().getName(), member.town().getColorRgb(),
+                        username, member.town().getName(), member.town().getRoleName(plugin, member.role().getWeight()), member.town().getColorRgb(),
                         Integer.toString(member.town().getLevel()),
                         plugin.formatMoney(member.town().getMoney()),
                         Integer.toString(member.town().getClaimCount()),
@@ -1227,7 +1315,7 @@ public class TownsManager {
         final Town town = member.town();
         plugin.getLocales().getLocale("town_chat_message_format",
                         town.getName(), town.getColorRgb(), member.user().getUsername(),
-                        member.role().getName(), text)
+                        town.getRoleName(plugin, member.role().getWeight()), text)
                 .map(MineDown::toComponent)
                 .ifPresent(locale -> plugin.getManager().sendTownMessage(town, locale));
         plugin.getManager().admin().sendLocalSpyMessage(town, member, text);

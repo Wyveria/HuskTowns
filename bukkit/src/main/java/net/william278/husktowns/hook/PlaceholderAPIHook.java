@@ -125,8 +125,7 @@ public class PlaceholderAPIHook extends Hook {
                         .orElse("Not in town"));
 
                 case "role" -> plugin.getUserTown(player)
-                    .map(Member::role)
-                    .map(Role::getName)
+                    .map(member -> member.town().getRoleName(plugin, member.role().getWeight()))
                     .orElse(plugin.getLocales().getRawLocale("placeholder_not_in_town")
                         .orElse("Not in town"));
 

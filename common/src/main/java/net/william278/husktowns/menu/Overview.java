@@ -21,6 +21,9 @@ package net.william278.husktowns.menu;
 
 import de.themoep.minedown.adventure.MineDown;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.william278.husktowns.HuskTowns;
 import net.william278.husktowns.town.Privilege;
@@ -130,12 +133,19 @@ public class Overview {
     private Component getTownHomes() {
         final int current = town.getHomes().size();
         final int max = plugin.getSettings().getGeneral().getMaxTownHomesForLevel(town.getLevel());
+        final Component fallback = Component.text("🏠 Homes: " + current + "/" + max)
+                .color(TextColor.fromHexString("#00fb9a"))
+                .hoverEvent(HoverEvent.showText(
+                        Component.text("Town homes").color(TextColor.fromHexString("#00fb9a"))
+                                .append(Component.newline())
+                                .append(Component.text("Named waypoints members can teleport to").color(NamedTextColor.DARK_GRAY))
+                                .append(Component.newline())
+                                .append(Component.text("Click to view list").color(NamedTextColor.DARK_GRAY))))
+                .clickEvent(ClickEvent.runCommand("/husktowns:town home"));
         return plugin.getLocales().getLocale("town_overview_homes",
                 Integer.toString(current), Integer.toString(max))
             .map(mineDown -> mineDown.toComponent().appendNewline())
-            .orElse(Component.text("Homes: " + current + "/" + max)
-                .color(TextColor.fromHexString("#ffc43b"))
-                .append(Component.newline()));
+            .orElse(fallback.append(Component.newline()));
     }
 
     @NotNull
@@ -184,8 +194,10 @@ public class Overview {
 
     @NotNull
     private Component getEditButtons() {
+        final boolean canEditRoleNames = hasPrivilege(Privilege.RENAME) || isViewerMayor();
         if (!isViewerMember() || !hasPrivilege(Privilege.SET_BIO) && !hasPrivilege(Privilege.SET_GREETING)
-            && !hasPrivilege(Privilege.SET_FAREWELL) && !hasPrivilege(Privilege.SET_RULES)) {
+            && !hasPrivilege(Privilege.SET_FAREWELL) && !canEditRoleNames
+            && !hasPrivilege(Privilege.SET_RULES)) {
             return Component.empty();
         }
         return plugin.getLocales().getLocale("town_button_group_edit")
@@ -199,6 +211,10 @@ public class Overview {
                 .map(mineDown -> mineDown.toComponent().append(Component.space()))
                 .orElse(Component.empty()) : Component.empty())
             .append(hasPrivilege(Privilege.SET_FAREWELL) ? plugin.getLocales().getLocale("town_button_farewell",
+                    town.getName())
+                .map(mineDown -> mineDown.toComponent().append(Component.space()))
+                .orElse(Component.empty()) : Component.empty())
+            .append(canEditRoleNames ? plugin.getLocales().getLocale("town_button_roles",
                     town.getName())
                 .map(mineDown -> mineDown.toComponent().append(Component.space()))
                 .orElse(Component.empty()) : Component.empty())
@@ -234,6 +250,13 @@ public class Overview {
     private boolean isViewerMember() {
         if (viewer instanceof OnlineUser user) {
             return town.getMembers().containsKey(user.getUuid());
+        }
+        return false;
+    }
+
+    private boolean isViewerMayor() {
+        if (viewer instanceof OnlineUser user) {
+            return town.getMayor().equals(user.getUuid());
         }
         return false;
     }

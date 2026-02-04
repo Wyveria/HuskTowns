@@ -157,14 +157,22 @@ public interface MessageHandler {
             return;
         }
         switch (message.getType()) {
-            case TOWN_DEMOTED -> getPlugin().getLocales().getLocale("demoted_you",
-                    getPlugin().getRoles().fromWeight(message.getPayload().getInteger().orElse(-1))
-                            .map(Role::getName).orElse("?"),
-                    message.getSender()).ifPresent(receiver::sendMessage);
-            case TOWN_PROMOTED -> getPlugin().getLocales().getLocale("promoted_you",
-                    getPlugin().getRoles().fromWeight(message.getPayload().getInteger().orElse(-1))
-                            .map(Role::getName).orElse("?"),
-                    message.getSender()).ifPresent(receiver::sendMessage);
+            case TOWN_DEMOTED -> {
+                final int weight = message.getPayload().getInteger().orElse(-1);
+                final String roleName = getPlugin().getUserTown(receiver)
+                    .map(m -> m.town().getRoleName(getPlugin(), weight))
+                    .orElseGet(() -> getPlugin().getRoles().fromWeight(weight).map(Role::getName).orElse("?"));
+                getPlugin().getLocales().getLocale("demoted_you", roleName, message.getSender())
+                    .ifPresent(receiver::sendMessage);
+            }
+            case TOWN_PROMOTED -> {
+                final int weight = message.getPayload().getInteger().orElse(-1);
+                final String roleName = getPlugin().getUserTown(receiver)
+                    .map(m -> m.town().getRoleName(getPlugin(), weight))
+                    .orElseGet(() -> getPlugin().getRoles().fromWeight(weight).map(Role::getName).orElse("?"));
+                getPlugin().getLocales().getLocale("promoted_you", roleName, message.getSender())
+                    .ifPresent(receiver::sendMessage);
+            }
             case TOWN_EVICTED -> {
                 getPlugin().getLocales().getLocale("evicted_you",
                         getPlugin().getUserTown(receiver).map(Member::town).map(Town::getName).orElse("?"),

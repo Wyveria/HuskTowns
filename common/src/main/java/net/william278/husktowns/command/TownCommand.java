@@ -22,6 +22,11 @@ package net.william278.husktowns.command;
 import com.google.common.collect.Lists;
 import de.themoep.minedown.adventure.MineDown;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.william278.husktowns.HuskTowns;
 import net.william278.husktowns.claim.*;
 import net.william278.husktowns.config.Locales;
@@ -77,6 +82,7 @@ public final class TownCommand extends Command {
             new MetaCommand(this, plugin, MetaCommand.Type.FAREWELL),
             new ColorCommand(this, plugin),
             new RenameCommand(this, plugin),
+            new RoleNamesCommand(this, plugin),
             new SpawnCommand(this, plugin),
             new SetSpawnCommand(this, plugin),
             new ClearSpawnCommand(this, plugin),
@@ -239,9 +245,10 @@ public final class TownCommand extends Command {
                             Integer.toString(town.getMembers().size()), Integer.toString(town.getMaxMembers(plugin)))
                         .map(MineDown::toComponent).orElse(Component.empty());
                     for (Map.Entry<Role, List<User>> users : members.entrySet()) {
+                        final String roleDisplayName = town.getRoleName(plugin, users.getKey().getWeight());
                         component = component.appendNewline()
                             .append(plugin.getLocales().getRawLocale("town_census_line",
-                                    Locales.escapeText(users.getKey().getName()),
+                                    Locales.escapeText(roleDisplayName),
                                     Integer.toString(users.getValue().size()),
                                     users.getValue().stream()
                                         .map(user -> plugin.getLocales().getRawLocale(String.format(
@@ -707,6 +714,130 @@ public final class TownCommand extends Command {
     }
 
     /**
+     * Command for viewing and editing per-town role display names
+     */
+    private static class RoleNamesCommand extends ChildCommand implements TabProvider {
+
+        private static final List<String> ROLE_KEYS = List.of("mayor", "trustee", "resident");
+
+        protected RoleNamesCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("roles", List.of("rolenames"), parent, "[set <mayor|trustee|resident> [name]]", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            if (!(executor instanceof OnlineUser user)) {
+                plugin.getLocales().getLocale("error_console_usage").ifPresent(executor::sendMessage);
+                return;
+            }
+            plugin.getUserTown(user).ifPresentOrElse(member -> {
+                final Town town = member.town();
+                if (args.length >= 2 && "set".equalsIgnoreCase(args[0])) {
+                    final boolean canEdit = member.hasPrivilege(plugin, Privilege.RENAME)
+                        || town.getMayor().equals(member.user().getUuid());
+                    if (!canEdit) {
+                        plugin.getLocales().getLocale("error_insufficient_privileges")
+                            .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    final Optional<Integer> weight = parseRoleWeight(args[1]);
+                    if (weight.isEmpty()) {
+                        plugin.getLocales().getLocale("error_invalid_role", args[1])
+                            .ifPresent(executor::sendMessage);
+                        return;
+                    }
+                    final Optional<String> newName = parseGreedyString(args, 2);
+                    final String toSet = newName.filter(s -> !s.equalsIgnoreCase("default") && !s.equalsIgnoreCase("reset")).orElse(null);
+                    plugin.getManager().towns().setTownRoleName(user, weight.get(), toSet);
+                } else {
+                    showRoleNames(executor, town);
+                }
+            }, () -> plugin.getLocales().getLocale("error_not_in_town").ifPresent(executor::sendMessage));
+        }
+
+        private void showRoleNames(@NotNull CommandUser executor, @NotNull Town town) {
+            final boolean canEdit = executor instanceof OnlineUser user
+                && plugin.getUserTown(user).map(m ->
+                m.hasPrivilege(plugin, Privilege.RENAME) || town.getMayor().equals(m.user().getUuid())).orElse(false);
+
+            Component title = plugin.getLocales().getLocale("town_roles_title", town.getName())
+                .map(MineDown::toComponent).orElse(Component.empty());
+            if (title.equals(Component.empty())) {
+                title = Component.text("Role names for ").color(TextColor.fromHexString("#00fb9a"))
+                    .append(Component.text(town.getName()).color(TextColor.fromHexString("#00fb9a")).decorate(TextDecoration.BOLD))
+                    .append(Component.text(":"));
+            }
+            executor.sendMessage(title);
+
+            for (final Role role : plugin.getRoles().getRoles()) {
+                final String displayName = town.getRoleName(plugin, role.getWeight());
+                final boolean isCustom = town.getRoleNames().containsKey(Integer.toString(role.getWeight()));
+                final String customLabel = isCustom
+                    ? plugin.getLocales().getRawLocale("town_roles_custom").orElse("(custom)")
+                    : plugin.getLocales().getRawLocale("town_roles_default").orElse("(default)");
+
+                Component line = plugin.getLocales().getLocale("town_roles_line",
+                        Integer.toString(role.getWeight()), displayName, customLabel)
+                    .map(MineDown::toComponent).orElse(Component.empty());
+                if (line.equals(Component.empty())) {
+                    line = Component.text(role.getWeight() + ": ").color(NamedTextColor.GRAY)
+                        .append(Component.text(displayName).color(TextColor.fromHexString("#00fb9a")))
+                        .append(Component.text(" " + customLabel).color(NamedTextColor.GRAY));
+                }
+                if (canEdit) {
+                    final String roleKey = weightToRoleKey(role.getWeight());
+                    line = line.append(Component.space())
+                        .append(Component.text("[Edit]").color(TextColor.fromHexString("#c160ff"))
+                            .hoverEvent(HoverEvent.showText(Component.text("Click to set a new name for " + roleKey)))
+                            .clickEvent(ClickEvent.suggestCommand("/husktowns:town roles set " + roleKey + " ")));
+                }
+                executor.sendMessage(line);
+            }
+
+            if (canEdit) {
+                final Component hint = plugin.getLocales().getLocale("town_roles_edit_hint")
+                    .map(MineDown::toComponent).orElse(Component.empty());
+                if (!hint.equals(Component.empty())) {
+                    executor.sendMessage(hint);
+                } else {
+                    executor.sendMessage(Component.text("To change a role name: /town roles set <mayor|trustee|resident> <name> — use default or reset to clear.")
+                        .color(NamedTextColor.GRAY));
+                }
+            }
+        }
+
+        private static String weightToRoleKey(int weight) {
+            return switch (weight) {
+                case 3 -> "mayor";
+                case 2 -> "trustee";
+                case 1 -> "resident";
+                default -> "resident";
+            };
+        }
+
+        private static Optional<Integer> parseRoleWeight(@NotNull String key) {
+            return switch (key.toLowerCase(Locale.ENGLISH)) {
+                case "mayor" -> Optional.of(3);
+                case "trustee" -> Optional.of(2);
+                case "resident" -> Optional.of(1);
+                default -> Optional.empty();
+            };
+        }
+
+        @Override
+        @Nullable
+        public List<String> suggest(@NotNull CommandUser user, @NotNull String[] args) {
+            if (args.length == 1) {
+                return filter(List.of("set"), args);
+            }
+            if (args.length == 2 && "set".equalsIgnoreCase(args[0])) {
+                return filter(ROLE_KEYS, args);
+            }
+            return null;
+        }
+    }
+
+    /**
      * Command for viewing a town's members
      */
     private static class LogCommand extends ChildCommand implements PageTabProvider {
@@ -890,7 +1021,7 @@ public final class TownCommand extends Command {
                 if (page.isPresent()) {
                     plugin.getManager().towns().listTownHomes(user, null, page.get());
                 } else {
-                    plugin.getManager().towns().teleportToTownHome(user, null, args[0]);
+                    plugin.getManager().towns().teleportToTownHome(user, null, Locales.unescapeText(args[0]));
                 }
                 return;
             }
@@ -898,7 +1029,7 @@ public final class TownCommand extends Command {
             if (page.isPresent()) {
                 plugin.getManager().towns().listTownHomes(user, args[0], page.get());
             } else {
-                plugin.getManager().towns().teleportToTownHome(user, args[0], args[1]);
+                plugin.getManager().towns().teleportToTownHome(user, Locales.unescapeText(args[0]), Locales.unescapeText(args[1]));
             }
         }
 
@@ -935,7 +1066,7 @@ public final class TownCommand extends Command {
                 return;
             }
             final OnlineUser user = (OnlineUser) executor;
-            plugin.getManager().towns().removeTownHome(user, name.get());
+            plugin.getManager().towns().removeTownHome(user, Locales.unescapeText(name.get()));
         }
 
         @Override
@@ -962,6 +1093,7 @@ public final class TownCommand extends Command {
                         .ifPresent(executor::sendMessage);
                 return;
             }
+            final String homeName = Locales.unescapeText(name.get());
             final OnlineUser user = (OnlineUser) executor;
             final Optional<Member> member = plugin.getUserTown(user);
             if (member.isEmpty()) {
@@ -970,17 +1102,23 @@ public final class TownCommand extends Command {
                 return;
             }
             final Town town = member.get().town();
-            final Optional<Spawn> home = town.getHome(name.get());
+            final Optional<Spawn> home = town.getHome(homeName);
             if (home.isEmpty()) {
-                plugin.getLocales().getLocale("error_town_home_not_found", name.get())
-                        .ifPresent(executor::sendMessage);
+                plugin.getLocales().getLocale("error_town_home_not_found", homeName)
+                        .ifPresentOrElse(executor::sendMessage,
+                                () -> executor.sendMessage(Component.text("Town home not found: " + homeName)
+                                        .color(TextColor.fromHexString("#ff7e5e"))));
+                plugin.getLocales().getLocale("town_home_list_stale_hint")
+                        .ifPresentOrElse(executor::sendMessage,
+                                () -> executor.sendMessage(Component.text("It may have been renamed or deleted. Run /town home to refresh the list.")
+                                        .color(TextColor.fromHexString("#00fb9a"))));
                 return;
             }
             final String homeNameKey = town.getHomes().entrySet().stream()
-                    .filter(e -> e.getKey().equalsIgnoreCase(name.get()))
+                    .filter(e -> e.getKey().equalsIgnoreCase(homeName))
                     .map(Map.Entry::getKey)
                     .findFirst()
-                    .orElse(name.get());
+                    .orElse(homeName);
             final Optional<String> operation = args.length > 1 ? parseStringArg(args, 1) : Optional.empty();
             if (operation.isEmpty()) {
                 showEditMenu(user, member.get(), town, homeNameKey, home.get());
@@ -1030,21 +1168,55 @@ public final class TownCommand extends Command {
 
         private void showEditMenu(@NotNull OnlineUser user, @NotNull Member member,
                                   @NotNull Town town, @NotNull String homeName, @NotNull Spawn spawn) {
-            plugin.getLocales().getLocale("edit_town_home_menu_title", homeName)
-                    .ifPresent(user::sendMessage);
-            plugin.getLocales().getLocale("edit_town_home_menu_coordinates",
+            final TextColor homeGreen = TextColor.fromHexString("#00fb9a");
+            final Component titleFallback = Component.text("Viewing details for town home, ")
+                    .color(homeGreen)
+                    .append(Component.text(homeName + ":").color(homeGreen).decorate(TextDecoration.BOLD));
+            sendEditMenuLine(user, "edit_town_home_menu_title", titleFallback, homeName);
+            sendEditMenuLine(user, "edit_town_home_menu_world",
+                    Component.text("⭘ " + spawn.getPosition().getWorld().getName()),
+                    spawn.getPosition().getWorld().getName());
+            sendEditMenuLine(user, "edit_town_home_menu_coordinates",
+                    Component.text("⚐ x: " + String.format("%.1f", spawn.getPosition().getX()) + ", y: " +
+                            String.format("%.1f", spawn.getPosition().getY()) + ", z: " +
+                            String.format("%.1f", spawn.getPosition().getZ()) + " (" +
+                            spawn.getPosition().getWorld().getName() + ")"),
                     String.format("%.1f", spawn.getPosition().getX()),
                     String.format("%.1f", spawn.getPosition().getY()),
                     String.format("%.1f", spawn.getPosition().getZ()),
-                    spawn.getPosition().getWorld().getName())
-                    .ifPresent(user::sendMessage);
-            plugin.getLocales().getLocale("edit_town_home_menu_use_buttons", homeName)
-                    .ifPresent(user::sendMessage);
+                    spawn.getPosition().getWorld().getName());
+            final Component useFallback = Component.text("Use: ").color(NamedTextColor.GRAY)
+                    .append(Component.text("[⏩ Teleport…]").color(TextColor.fromHexString("#00fb9a"))
+                            .hoverEvent(HoverEvent.showText(Component.text("Click to teleport to this town home")))
+                            .clickEvent(ClickEvent.runCommand("/husktowns:town home " + homeName)));
+            sendEditMenuLine(user, "edit_town_home_menu_use_buttons", useFallback, homeName);
             if (member.hasPrivilege(plugin, Privilege.SET_HOME)) {
-                plugin.getLocales().getLocale("edit_town_home_menu_manage_buttons", homeName)
-                        .ifPresent(user::sendMessage);
-                plugin.getLocales().getLocale("edit_town_home_menu_rename_button", homeName)
-                        .ifPresent(user::sendMessage);
+                // Always use code-built buttons so run_command/suggest_command have the exact homeName (avoids locale substitution issues)
+                final Component manageLine = Component.text("Manage: ").color(NamedTextColor.GRAY)
+                        .append(Component.text("[❌ Delete…]").color(TextColor.fromHexString("#ff3300"))
+                                .hoverEvent(HoverEvent.showText(Component.text("Click to delete this town home\n⚠ This cannot be undone!")))
+                                .clickEvent(ClickEvent.runCommand("/husktowns:town delhome " + homeName)))
+                        .append(Component.text("   "))
+                        .append(Component.text("[⚐ Relocate…]").color(TextColor.fromHexString("#f5c962"))
+                                .hoverEvent(HoverEvent.showText(Component.text("Click to relocate this town home to your position")))
+                                .clickEvent(ClickEvent.runCommand("/husktowns:town edithome " + homeName + " relocate")));
+                user.sendMessage(manageLine);
+                final Component renameLine = Component.text("Edit: ").color(NamedTextColor.GRAY)
+                        .append(Component.text("[✎ Rename…]").color(TextColor.fromHexString("#c160ff"))
+                                .hoverEvent(HoverEvent.showText(Component.text("Click to suggest the rename command")))
+                                .clickEvent(ClickEvent.suggestCommand("/town edithome " + homeName + " rename ")));
+                user.sendMessage(renameLine);
+            }
+        }
+
+        private void sendEditMenuLine(@NotNull OnlineUser user, @NotNull String localeKey,
+                                      @NotNull Component fallback, @NotNull String... replacements) {
+            if (replacements.length == 0) {
+                plugin.getLocales().getLocale(localeKey)
+                        .ifPresentOrElse(user::sendMessage, () -> user.sendMessage(fallback));
+            } else {
+                plugin.getLocales().getLocale(localeKey, replacements)
+                        .ifPresentOrElse(user::sendMessage, () -> user.sendMessage(fallback));
             }
         }
 
