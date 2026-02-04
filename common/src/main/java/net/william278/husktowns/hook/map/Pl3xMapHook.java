@@ -49,7 +49,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class Pl3xMapHook extends MapHook {
 
-    private static final String CLAIMS_LAYER = "claim_markers";
+    private static final String CLAIMS_LAYER = "town_markers";
     private final ConcurrentHashMap<ClaimWorld, ConcurrentLinkedQueue<TownClaim>> claims = new ConcurrentHashMap<>();
 
     @PluginHook(id = "Pl3xMap", register = PluginHook.Register.ON_ENABLE, platform = "common")
