@@ -100,10 +100,10 @@ public final class BukkitUser extends OnlineUser {
     @SuppressWarnings("JavaReflectionMemberAccess")
     private static Particle getCompatibleParticle() {
         try {
-            return Particle.REDSTONE;
+            return Particle.DUST;  // 1.20.5+ / Paper (REDSTONE was renamed)
         } catch (NoSuchFieldError e) {
             try {
-                return (Particle) Particle.class.getField("DUST").get(null);
+                return (Particle) Particle.class.getField("REDSTONE").get(null);
             } catch (Throwable t) {
                 return null;
             }
