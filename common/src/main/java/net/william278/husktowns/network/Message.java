@@ -204,6 +204,10 @@ public class Message {
          */
         TOWN_CHAT_MESSAGE,
         /**
+         * A message for dispatching a cross-server ally chat message
+         */
+        ALLY_CHAT_MESSAGE,
+        /**
          * Request other servers for a list of online users
          */
         REQUEST_USER_LIST,

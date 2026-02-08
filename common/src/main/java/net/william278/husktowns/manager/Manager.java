@@ -36,7 +36,10 @@ import net.william278.husktowns.user.Preferences;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -259,6 +262,25 @@ public class Manager {
     public void sendTownMessage(@NotNull Town town, @NotNull Component message) {
         plugin.getOnlineUsers().stream()
             .filter(user -> town.getMembers().containsKey(user.getUuid()))
+            .filter(user -> plugin.getUserPreferences(user.getUuid())
+                .map(Preferences::sendTownMessages).orElse(true))
+            .forEach(user -> user.sendMessage(message));
+    }
+
+    /**
+     * Send a message to all online users in a town and its allied towns
+     *
+     * @param senderTown  The town whose member sent the message
+     * @param alliedTowns The towns allied with the sender (bilateral alliance)
+     * @param message     The message to send
+     */
+    public void sendMessageToTownAndAllies(@NotNull Town senderTown, @NotNull List<Town> alliedTowns,
+                                          @NotNull Component message) {
+        final Set<Integer> recipientTownIds = new HashSet<>();
+        recipientTownIds.add(senderTown.getId());
+        alliedTowns.forEach(t -> recipientTownIds.add(t.getId()));
+        plugin.getOnlineUsers().stream()
+            .filter(user -> plugin.getUserTown(user).map(m -> recipientTownIds.contains(m.town().getId())).orElse(false))
             .filter(user -> plugin.getUserPreferences(user.getUuid())
                 .map(Preferences::sendTownMessages).orElse(true))
             .forEach(user -> user.sendMessage(message));

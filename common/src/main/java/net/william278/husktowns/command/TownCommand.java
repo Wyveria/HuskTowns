@@ -106,6 +106,9 @@ public final class TownCommand extends Command {
             if (relations.getWars().isEnabled()) {
                 children.add(new WarCommand(this, plugin));
             }
+            if (plugin.getSettings().getTowns().getChat().isAllyChatEnabled()) {
+                children.add(new AllyChatCommand(this, plugin));
+            }
         }
         if (plugin.getEconomyHook().isPresent()) {
             children.add(new MoneyCommand(this, plugin, true));
@@ -714,7 +717,8 @@ public final class TownCommand extends Command {
     }
 
     /**
-     * Command for viewing and editing per-town role display names
+     * Command for viewing and editing per-town role display names.
+     * Uses parent permission so access is gated by town role (mayor or RENAME) only.
      */
     private static class RoleNamesCommand extends ChildCommand implements TabProvider {
 
@@ -722,6 +726,12 @@ public final class TownCommand extends Command {
 
         protected RoleNamesCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
             super("roles", List.of("rolenames"), parent, "[set <mayor|trustee|resident> [name]]", plugin);
+        }
+
+        @Override
+        @NotNull
+        public String getPermission() {
+            return parent.getPermission();
         }
 
         @Override
@@ -1521,6 +1531,19 @@ public final class TownCommand extends Command {
             final OnlineUser user = (OnlineUser) executor;
             final Optional<String> message = parseGreedyString(args, 0);
             plugin.getManager().towns().sendChatMessage(user, message.orElse(null));
+        }
+    }
+
+    private static class AllyChatCommand extends ChildCommand {
+        protected AllyChatCommand(@NotNull Command parent, @NotNull HuskTowns plugin) {
+            super("allychat", List.of("ac"), parent, "[message]", plugin);
+        }
+
+        @Override
+        public void execute(@NotNull CommandUser executor, @NotNull String[] args) {
+            final OnlineUser user = (OnlineUser) executor;
+            final Optional<String> message = parseGreedyString(args, 0);
+            plugin.getManager().towns().sendAllyChatMessage(user, message.orElse(null));
         }
     }
 

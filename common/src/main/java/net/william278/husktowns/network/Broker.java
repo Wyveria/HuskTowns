@@ -63,6 +63,7 @@ public abstract class Broker implements MessageHandler {
             case TOWN_INVITE_REQUEST -> handleTownInviteRequest(message, receiver);
             case TOWN_INVITE_REPLY -> handleTownInviteReply(message, receiver);
             case TOWN_CHAT_MESSAGE -> handleTownChatMessage(message);
+            case ALLY_CHAT_MESSAGE -> handleAllyChatMessage(message);
             case TOWN_LEVEL_UP, TOWN_TRANSFERRED, TOWN_RENAMED -> handleTownAction(message);
             case TOWN_DEMOTED, TOWN_PROMOTED, TOWN_EVICTED -> handleTownUserAction(message, receiver);
             case TOWN_WAR_DECLARATION_SENT -> handleTownWarDeclarationSent(message);

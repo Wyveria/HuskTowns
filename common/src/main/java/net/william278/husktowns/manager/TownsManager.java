@@ -50,6 +50,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
@@ -60,6 +61,14 @@ public class TownsManager {
     private final Set<UUID> currencyLock = ConcurrentHashMap.newKeySet();
     private final Set<Integer> levelUpLock = ConcurrentHashMap.newKeySet();
     private final Set<Integer> roleChangeLock = ConcurrentHashMap.newKeySet();
+
+    /** Per-town chat history (town id -> last N messages). */
+    private final Map<Integer, Deque<ChatHistoryEntry>> townChatHistoryByTown = new ConcurrentHashMap<>();
+    /** Last N ally chat messages (global; filtered by recipient's town/allies when sending). */
+    private final Deque<ChatHistoryEntry> allyChatHistory = new ConcurrentLinkedDeque<>();
+
+    private record ChatHistoryEntry(int townId, @NotNull String townName, @NotNull String townColorRgb,
+                                    @NotNull String username, @NotNull String roleName, @NotNull String text) {}
 
     protected TownsManager(@NotNull HuskTowns plugin) {
         this.plugin = plugin;
@@ -340,6 +349,7 @@ public class TownsManager {
                                 .ifPresent(message -> plugin.getManager().sendTownMessage(town, message));
                         plugin.editUserPreferences(user, (preferences -> {
                             preferences.setTownChatTalking(false);
+                            preferences.setAllyChatTalking(false);
                             preferences.setAutoClaimingLand(false);
                         }));
                     }))));
@@ -385,6 +395,7 @@ public class TownsManager {
                                             plugin.editUserPreferences(evicted.get(),
                                                     (preferences -> {
                                                         preferences.setTownChatTalking(false);
+                                                        preferences.setAllyChatTalking(false);
                                                         preferences.setAutoClaimingLand(false);
                                                     }));
                                         },
@@ -1290,10 +1301,17 @@ public class TownsManager {
         plugin.getManager().ifMember(user, Privilege.CHAT, (member -> {
             if (message == null) {
                 plugin.editUserPreferences(user, (preferences) -> {
-                    preferences.setTownChatTalking(!preferences.isTownChatTalking());
+                    final boolean turningOn = !preferences.isTownChatTalking();
+                    preferences.setTownChatTalking(turningOn);
+                    if (turningOn) {
+                        preferences.setAllyChatTalking(false);
+                    }
                     plugin.getLocales().getLocale(preferences.isTownChatTalking()
                                     ? "town_chat_talking" : "town_chat_not_talking")
                             .ifPresent(user::sendMessage);
+                    if (turningOn && plugin.getSettings().getTowns().getChat().isChatHistoryShowOnToggle()) {
+                        sendTownChatHistoryTo(user);
+                    }
                 });
                 return;
             }
@@ -1311,14 +1329,199 @@ public class TownsManager {
         }));
     }
 
+    public void sendAllyChatMessage(@NotNull OnlineUser user, @Nullable String message) {
+        final var chatSettings = plugin.getSettings().getTowns().getChat();
+        if (!chatSettings.isAllyChatEnabled() || !plugin.getSettings().getTowns().getRelations().isEnabled()) {
+            plugin.getLocales().getLocale("error_ally_chat_disabled").ifPresent(user::sendMessage);
+            return;
+        }
+        plugin.getManager().ifMember(user, Privilege.CHAT, (member -> {
+            final Town town = member.town();
+            final List<Town> allies = getAlliedTowns(town);
+            if (allies.isEmpty()) {
+                // Ally chat requires mutual alliances; explain so one-way "allies" in overview don't confuse
+                plugin.getLocales().getLocale("error_ally_chat_no_mutual_allies", town.getName())
+                        .ifPresent(user::sendMessage);
+                return;
+            }
+            if (message == null) {
+                plugin.editUserPreferences(user, (preferences) -> {
+                    final boolean turningOn = !preferences.isAllyChatTalking();
+                    preferences.setAllyChatTalking(turningOn);
+                    if (turningOn) {
+                        preferences.setTownChatTalking(false);
+                    }
+                    plugin.getLocales().getLocale(preferences.isAllyChatTalking()
+                                    ? "ally_chat_talking" : "ally_chat_not_talking")
+                            .ifPresent(user::sendMessage);
+                    if (turningOn && chatSettings.isChatHistoryShowOnToggle()) {
+                        sendAllyChatHistoryTo(user);
+                    }
+                });
+                return;
+            }
+
+            sendLocalAllyChatMessage(message, member, plugin);
+
+            plugin.getMessageBroker().ifPresent(broker -> Message.builder()
+                    .type(Message.Type.ALLY_CHAT_MESSAGE)
+                    .payload(Payload.string(message))
+                    .target(Message.TARGET_ALL, Message.TargetType.SERVER)
+                    .build()
+                    .send(broker, user));
+        }));
+    }
+
+    @NotNull
+    private List<Town> getAlliedTowns(@NotNull Town town) {
+        return town.getRelations(plugin).entrySet().stream()
+                .filter(e -> e.getValue() == Town.Relation.ALLY && town.areRelationsBilateral(e.getKey(), Town.Relation.ALLY))
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    @NotNull
+    private String formatPrefixSuffix(@NotNull String format, @NotNull Town town, @NotNull Member member) {
+        if (format == null || format.isEmpty()) {
+            return "";
+        }
+        final String roleName = town.getRoleName(plugin, member.role().getWeight());
+        return format
+                .replace("%town_name%", town.getName())
+                .replace("%role%", roleName)
+                .replace("%username%", member.user().getUsername());
+    }
+
     public void sendLocalChatMessage(@NotNull String text, @NotNull Member member, @NotNull HuskTowns plugin) {
         final Town town = member.town();
-        plugin.getLocales().getLocale("town_chat_message_format",
-                        town.getName(), town.getColorRgb(), member.user().getUsername(),
-                        town.getRoleName(plugin, member.role().getWeight()), text)
-                .map(MineDown::toComponent)
-                .ifPresent(locale -> plugin.getManager().sendTownMessage(town, locale));
+        final var chatSettings = plugin.getSettings().getTowns().getChat();
+        final String roleName = town.getRoleName(plugin, member.role().getWeight());
+        final String username = member.user().getUsername();
+
+        Optional<Component> base = plugin.getLocales().getLocale("town_chat_message_format",
+                        town.getName(), town.getColorRgb(), username, roleName, text)
+                .map(MineDown::toComponent);
+
+        Component message = base.orElse(Component.text(text));
+        final String prefixStr = formatPrefixSuffix(chatSettings.getTownChatPrefixFormat(), town, member);
+        final String suffixStr = formatPrefixSuffix(chatSettings.getTownChatSuffixFormat(), town, member);
+        if (!prefixStr.isEmpty()) {
+            message = Component.text(prefixStr).append(message);
+        }
+        if (!suffixStr.isEmpty()) {
+            message = message.append(Component.text(suffixStr));
+        }
+
+        plugin.getManager().sendTownMessage(town, message);
         plugin.getManager().admin().sendLocalSpyMessage(town, member, text);
+
+        if (chatSettings.getChatHistorySize() > 0) {
+            addToTownChatHistory(town.getId(), new ChatHistoryEntry(town.getId(), town.getName(), town.getColorRgb(), username, roleName, text));
+        }
+    }
+
+    public void sendLocalAllyChatMessage(@NotNull String text, @NotNull Member member, @NotNull HuskTowns plugin) {
+        final Town town = member.town();
+        final List<Town> alliedTowns = getAlliedTowns(town);
+        if (alliedTowns.isEmpty()) {
+            return;
+        }
+        final var chatSettings = plugin.getSettings().getTowns().getChat();
+        final String roleName = town.getRoleName(plugin, member.role().getWeight());
+        final String username = member.user().getUsername();
+
+        Optional<Component> base = plugin.getLocales().getLocale("ally_chat_message_format",
+                        town.getName(), town.getColorRgb(), username, roleName, text)
+                .map(MineDown::toComponent);
+
+        Component message = base.orElse(Component.text(text));
+        final String prefixStr = formatPrefixSuffix(chatSettings.getAllyChatPrefixFormat(), town, member);
+        final String suffixStr = formatPrefixSuffix(chatSettings.getAllyChatSuffixFormat(), town, member);
+        if (!prefixStr.isEmpty()) {
+            message = Component.text(prefixStr).append(message);
+        }
+        if (!suffixStr.isEmpty()) {
+            message = message.append(Component.text(suffixStr));
+        }
+
+        plugin.getManager().sendMessageToTownAndAllies(town, alliedTowns, message);
+
+        if (chatSettings.getChatHistorySize() > 0) {
+            addToAllyChatHistory(new ChatHistoryEntry(town.getId(), town.getName(), town.getColorRgb(), username, roleName, text));
+        }
+    }
+
+    private void addToTownChatHistory(int townId, @NotNull ChatHistoryEntry entry) {
+        final Deque<ChatHistoryEntry> queue = townChatHistoryByTown.computeIfAbsent(townId, k -> new ConcurrentLinkedDeque<>());
+        queue.addLast(entry);
+        trimHistory(queue, plugin.getSettings().getTowns().getChat().getChatHistorySize());
+    }
+
+    private void addToAllyChatHistory(@NotNull ChatHistoryEntry entry) {
+        allyChatHistory.addLast(entry);
+        trimHistory(allyChatHistory, plugin.getSettings().getTowns().getChat().getChatHistorySize());
+    }
+
+    private void trimHistory(@NotNull Deque<ChatHistoryEntry> history, int maxSize) {
+        while (history.size() > maxSize) {
+            history.pollFirst();
+        }
+    }
+
+    public void sendTownChatHistoryTo(@NotNull OnlineUser user) {
+        final int size = plugin.getSettings().getTowns().getChat().getChatHistorySize();
+        if (size <= 0) {
+            return;
+        }
+        final Optional<Member> member = plugin.getUserTown(user);
+        if (member.isEmpty()) {
+            return;
+        }
+        final int townId = member.get().town().getId();
+        final Deque<ChatHistoryEntry> history = townChatHistoryByTown.get(townId);
+        if (history == null || history.isEmpty()) {
+            return;
+        }
+        plugin.getLocales().getLocale("town_chat_history_header").map(MineDown::toComponent).ifPresent(user::sendMessage);
+        final List<ChatHistoryEntry> list = new ArrayList<>(history);
+        final int start = Math.max(0, list.size() - size);
+        for (int i = start; i < list.size(); i++) {
+            final ChatHistoryEntry e = list.get(i);
+            plugin.getLocales().getLocale("town_chat_history_line",
+                    e.townName(), e.townColorRgb(), e.username(), e.roleName(), e.text())
+                    .map(MineDown::toComponent)
+                    .ifPresent(user::sendMessage);
+        }
+    }
+
+    public void sendAllyChatHistoryTo(@NotNull OnlineUser user) {
+        final int size = plugin.getSettings().getTowns().getChat().getChatHistorySize();
+        if (size <= 0) {
+            return;
+        }
+        final Optional<Member> member = plugin.getUserTown(user);
+        if (member.isEmpty()) {
+            return;
+        }
+        final Town userTown = member.get().town();
+        final Set<Integer> allowedTownIds = new HashSet<>();
+        allowedTownIds.add(userTown.getId());
+        getAlliedTowns(userTown).forEach(t -> allowedTownIds.add(t.getId()));
+        final List<ChatHistoryEntry> list = allyChatHistory.stream()
+                .filter(e -> allowedTownIds.contains(e.townId()))
+                .toList();
+        final int start = Math.max(0, list.size() - size);
+        if (start >= list.size()) {
+            return;
+        }
+        plugin.getLocales().getLocale("ally_chat_history_header").map(MineDown::toComponent).ifPresent(user::sendMessage);
+        for (int i = start; i < list.size(); i++) {
+            final ChatHistoryEntry e = list.get(i);
+            plugin.getLocales().getLocale("ally_chat_history_line",
+                    e.townName(), e.townColorRgb(), e.username(), e.roleName(), e.text())
+                    .map(MineDown::toComponent)
+                    .ifPresent(user::sendMessage);
+        }
     }
 
 }

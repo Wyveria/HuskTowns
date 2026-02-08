@@ -320,6 +320,40 @@ public class Settings {
         private String boostParticle = "spell_witch";
 
 
+        // Town chat enhancements
+        @Comment("Town chat enhancements: prefix/suffix, ally chat, and chat history")
+        private ChatSettings chat = new ChatSettings();
+
+        @Getter
+        @Configuration
+        @NoArgsConstructor(access = AccessLevel.PRIVATE)
+        public static class ChatSettings {
+
+            @Comment("Enable ally chat: a shared channel for allied towns. Requires relations to be enabled.")
+            private boolean allyChatEnabled = true;
+
+            @Comment("Optional prefix for town chat messages. Placeholders: %town_name%, %role%, %username%. Empty = no prefix.")
+            private String townChatPrefixFormat = "";
+
+            @Comment("Optional suffix for town chat messages. Same placeholders. Empty = no suffix.")
+            private String townChatSuffixFormat = "";
+
+            @Comment("Optional prefix for ally chat messages. Placeholders: %town_name%, %role%, %username%.")
+            private String allyChatPrefixFormat = "";
+
+            @Comment("Optional suffix for ally chat messages.")
+            private String allyChatSuffixFormat = "";
+
+            @Comment("Maximum number of town chat messages to keep in history (0 = disable history)")
+            private int chatHistorySize = 20;
+
+            @Comment("Send chat history to the player when they join and are in town chat mode")
+            private boolean chatHistoryShowOnJoin = true;
+
+            @Comment("Send chat history when the player toggles town or ally chat on")
+            private boolean chatHistoryShowOnToggle = true;
+        }
+
         // Town relations settings
         @Comment("Relations settings")
         private RelationsSettings relations = new RelationsSettings();

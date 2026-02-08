@@ -61,6 +61,22 @@ public interface UserListener {
                 } else {
                     getPlugin().getLocales().getLocale("town_chat_reminder")
                             .ifPresent(user::sendMessage);
+                    if (getPlugin().getSettings().getTowns().getChat().isChatHistoryShowOnJoin()) {
+                        getPlugin().getManager().towns().sendTownChatHistoryTo(user);
+                    }
+                }
+            }
+            // Notify if the user is in ally chat
+            if (preferences.isAllyChatTalking()) {
+                if (userTown.isEmpty()) {
+                    preferences.setAllyChatTalking(false);
+                    updateNeeded = true;
+                } else {
+                    getPlugin().getLocales().getLocale("ally_chat_reminder")
+                            .ifPresent(user::sendMessage);
+                    if (getPlugin().getSettings().getTowns().getChat().isChatHistoryShowOnJoin()) {
+                        getPlugin().getManager().towns().sendAllyChatHistoryTo(user);
+                    }
                 }
             }
 
@@ -137,7 +153,15 @@ public interface UserListener {
 
     default boolean handlePlayerChat(@NotNull OnlineUser user, @NotNull String message) {
         final Optional<Preferences> preferences = getPlugin().getUserPreferences(user.getUuid());
-        if (preferences.isPresent() && preferences.get().isTownChatTalking()) {
+        if (preferences.isEmpty()) {
+            return false;
+        }
+        final Preferences prefs = preferences.get();
+        if (prefs.isAllyChatTalking()) {
+            getPlugin().getManager().towns().sendAllyChatMessage(user, message);
+            return true;
+        }
+        if (prefs.isTownChatTalking()) {
             getPlugin().getManager().towns().sendChatMessage(user, message);
             return true;
         }

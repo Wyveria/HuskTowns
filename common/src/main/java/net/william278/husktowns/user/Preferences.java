@@ -41,6 +41,10 @@ public class Preferences {
     private boolean townChatTalking;
 
     @Expose
+    @SerializedName("ally_chat_talking")
+    private boolean allyChatTalking;
+
+    @Expose
     @SerializedName("town_chat_spying")
     private boolean townChatSpying;
 
@@ -77,6 +81,7 @@ public class Preferences {
         return new Preferences(
             false,
             false,
+            false,
             true,
             false,
             false
@@ -87,15 +92,17 @@ public class Preferences {
      * <b>Internal use only</b> - Construct {@link Preferences} for a user
      *
      * @param townChatTalking  If the user is talking in town chat
+     * @param allyChatTalking  If the user is talking in ally chat
      * @param townChatSpying   If the user is spying on town chat
      * @param townMessages     If the user is receiving town notifications
      * @param autoClaimingLand If the user is auto-claiming land
      * @param ignoringClaims   If the user is ignoring claims
      * @since 2.0
      */
-    private Preferences(boolean townChatTalking, boolean townChatSpying, boolean townMessages,
+    private Preferences(boolean townChatTalking, boolean allyChatTalking, boolean townChatSpying, boolean townMessages,
                         boolean autoClaimingLand, boolean ignoringClaims) {
         this.townChatTalking = townChatTalking;
+        this.allyChatTalking = allyChatTalking;
         this.townChatSpying = townChatSpying;
         this.townMessages = townMessages;
         this.autoClaimingLand = autoClaimingLand;
@@ -124,6 +131,24 @@ public class Preferences {
      */
     public void setTownChatTalking(boolean townChatTalking) {
         this.townChatTalking = townChatTalking;
+    }
+
+    /**
+     * Get if the user is talking in ally chat
+     *
+     * @return {@code true} if the user is talking in ally chat, {@code false} otherwise
+     */
+    public boolean isAllyChatTalking() {
+        return allyChatTalking;
+    }
+
+    /**
+     * Set if the user is talking in ally chat
+     *
+     * @param allyChatTalking {@code true} if the user is talking in ally chat, {@code false} otherwise
+     */
+    public void setAllyChatTalking(boolean allyChatTalking) {
+        this.allyChatTalking = allyChatTalking;
     }
 
     /**

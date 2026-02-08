@@ -134,6 +134,12 @@ public interface MessageHandler {
                 .ifPresent(member -> getPlugin().getManager().towns().sendLocalChatMessage(text, member, getPlugin())));
     }
 
+    default void handleAllyChatMessage(@NotNull Message message) {
+        message.getPayload().getString().ifPresent(text -> getPlugin().getDatabase().getUser(message.getSender())
+                .flatMap(sender -> getPlugin().getUserTown(sender.user()))
+                .ifPresent(member -> getPlugin().getManager().towns().sendLocalAllyChatMessage(text, member, getPlugin())));
+    }
+
     default void handleTownAction(@NotNull Message message) {
         message.getPayload().getInteger().flatMap(id -> getPlugin().getTowns().stream()
                 .filter(town -> town.getId() == id).findFirst()).ifPresent(town -> {
@@ -177,7 +183,10 @@ public interface MessageHandler {
                 getPlugin().getLocales().getLocale("evicted_you",
                         getPlugin().getUserTown(receiver).map(Member::town).map(Town::getName).orElse("?"),
                         message.getSender()).ifPresent(receiver::sendMessage);
-                getPlugin().editUserPreferences(receiver, preferences -> preferences.setTownChatTalking(false));
+                getPlugin().editUserPreferences(receiver, preferences -> {
+                    preferences.setTownChatTalking(false);
+                    preferences.setAllyChatTalking(false);
+                });
             }
         }
     }
