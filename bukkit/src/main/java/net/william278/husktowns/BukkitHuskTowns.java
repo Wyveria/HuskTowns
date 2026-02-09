@@ -31,6 +31,7 @@ import net.roxeez.advancement.AdvancementManager;
 import net.roxeez.advancement.display.BackgroundType;
 import net.roxeez.advancement.display.FrameType;
 import net.roxeez.advancement.trigger.TriggerType;
+import net.william278.cloplib.operation.Operation;
 import net.william278.cloplib.listener.OperationListener;
 import net.william278.desertwell.util.Version;
 import net.william278.husktowns.advancement.Advancement;
@@ -67,6 +68,10 @@ import org.bstats.charts.SimplePie;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.block.Block;
+import org.bukkit.block.TileState;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.advancement.AdvancementProgress;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginDescriptionFile;
@@ -340,6 +345,32 @@ public class BukkitHuskTowns extends JavaPlugin implements HuskTowns, BukkitTask
             return 64D;
         }
         return bukkitWorld.getHighestBlockYAt((int) Math.floor(x), (int) Math.floor(z));
+    }
+
+    @Override
+    public boolean shouldBypassContainerOpenForShop(@NotNull Operation operation) {
+        if (Bukkit.getPluginManager().getPlugin("EzChestShop") == null) {
+            return false;
+        }
+        if (!(operation.getOperationPosition() instanceof Position position)) {
+            return false;
+        }
+        final org.bukkit.World world = Bukkit.getWorld(position.getWorld().getName()) == null
+            ? Bukkit.getWorld(position.getWorld().getUuid())
+            : Bukkit.getWorld(position.getWorld().getName());
+        if (world == null) {
+            return false;
+        }
+        final Block block = world.getBlockAt(
+            (int) Math.floor(position.getX()),
+            (int) Math.floor(position.getY()),
+            (int) Math.floor(position.getZ())
+        );
+        if (!(block.getState() instanceof TileState state)) {
+            return false;
+        }
+        final PersistentDataContainer pdc = state.getPersistentDataContainer();
+        return pdc.has(NamespacedKey.fromString("ezchestshop:owner"), PersistentDataType.STRING);
     }
 
     @Override

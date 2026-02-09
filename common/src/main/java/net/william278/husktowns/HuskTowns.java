@@ -22,6 +22,7 @@ package net.william278.husktowns;
 import net.kyori.adventure.audience.Audience;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.platform.AudienceProvider;
+import net.william278.cloplib.operation.Operation;
 import net.william278.cloplib.listener.OperationListener;
 import net.william278.husktowns.advancement.AdvancementProvider;
 import net.william278.husktowns.claim.*;
@@ -148,6 +149,18 @@ public interface HuskTowns extends Task.Supplier, ConfigProvider, EventDispatche
     boolean isLoaded();
 
     void setLoaded(boolean loaded);
+
+    /**
+     * Returns whether to allow container open at the operation position (e.g. when the block is an EzChestShop shop).
+     * When true, the operation will not be cancelled for CONTAINER_OPEN. Platform implementations may check
+     * for third-party shop plugins so that players can use chest shops in claims without enabling public container access.
+     *
+     * @param operation the container open operation
+     * @return true to allow the operation (do not cancel)
+     */
+    default boolean shouldBypassContainerOpenForShop(@NotNull Operation operation) {
+        return false;
+    }
 
     @NotNull
     Set<Town> getTowns();

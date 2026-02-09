@@ -24,6 +24,7 @@ import net.kyori.adventure.text.format.TextColor;
 import net.william278.cloplib.handler.ChunkHandler;
 import net.william278.cloplib.operation.Operation;
 import net.william278.cloplib.operation.OperationChunk;
+import net.william278.cloplib.operation.OperationType;
 import net.william278.cloplib.operation.OperationUser;
 import net.william278.cloplib.operation.OperationWorld;
 import net.william278.husktowns.HuskTowns;
@@ -160,7 +161,7 @@ public interface OperationHandler extends ChunkHandler {
                     getPlugin().getLocales().getLocale("operation_cancelled")
                         .ifPresent(optionalUser.get()::sendMessage);
                 }
-                return true;
+                return cancelOrBypassContainerOpen(operation);
             }
             return false;
         }
@@ -172,9 +173,16 @@ public interface OperationHandler extends ChunkHandler {
                 getPlugin().getLocales().getLocale("operation_cancelled")
                     .ifPresent(optionalUser.get()::sendMessage);
             }
-            return true;
+            return cancelOrBypassContainerOpen(operation);
         }
         return false;
+    }
+
+    private boolean cancelOrBypassContainerOpen(@NotNull Operation operation) {
+        if (operation.getType() == OperationType.CONTAINER_OPEN && getPlugin().shouldBypassContainerOpenForShop(operation)) {
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -196,14 +204,17 @@ public interface OperationHandler extends ChunkHandler {
                     .map(online -> war.isPlayerActive(online.getUuid()))
                     .orElse(false))
                 .orElse(false)) {
-            return getPlugin().getRulePresets().getWartimeRules(getPlugin().getFlags())
-                .cancelOperation(operation.getType(), getPlugin().getFlags());
+            if (getPlugin().getRulePresets().getWartimeRules(getPlugin().getFlags())
+                .cancelOperation(operation.getType(), getPlugin().getFlags())) {
+                return cancelOrBypassContainerOpen(operation);
+            }
+            return false;
         }
 
         // If the operation is not allowed by the claim flags
         if (town.getRules().get(claim.getType()).cancelOperation(operation.getType(), getPlugin().getFlags())) {
             if (optionalUser.isEmpty()) {
-                return true;
+                return cancelOrBypassContainerOpen(operation);
             }
 
             // Handle admin claims
@@ -229,7 +240,7 @@ public interface OperationHandler extends ChunkHandler {
                     getPlugin().getLocales().getLocale("operation_cancelled_claimed",
                         town.getName()).ifPresent(user::sendMessage);
                 }
-                return true;
+                return cancelOrBypassContainerOpen(operation);
             }
 
             final Member member = optionalMember.get();
@@ -238,7 +249,7 @@ public interface OperationHandler extends ChunkHandler {
                     getPlugin().getLocales().getLocale("operation_cancelled_claimed",
                         town.getName()).ifPresent(user::sendMessage);
                 }
-                return true;
+                return cancelOrBypassContainerOpen(operation);
             }
 
             if (!member.hasPrivilege(getPlugin(), Privilege.TRUSTED_ACCESS)) {
@@ -246,7 +257,7 @@ public interface OperationHandler extends ChunkHandler {
                     getPlugin().getLocales().getLocale("operation_cancelled_privileges")
                         .ifPresent(user::sendMessage);
                 }
-                return true;
+                return cancelOrBypassContainerOpen(operation);
             }
             return false;
         }
